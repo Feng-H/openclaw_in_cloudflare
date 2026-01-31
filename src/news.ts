@@ -100,16 +100,51 @@ async function fetchHackerNewsAI(limit: number = 10): Promise<NewsItem[]> {
 }
 
 /**
+ * 抓取 GitHub 上的热门 AI 项目 (模拟 Trending)
+ */
+async function fetchGitHubTrending(): Promise<NewsItem[]> {
+  try {
+    // 搜索条件：过去7天内创建的、且 star 数较高的 AI 项目，或者近期 star 飙升的项目
+    // 由于 GitHub Search API 限制，我们搜索按 stars 排序的 AI 仓库
+    const date = new Date();
+    date.setDate(date.getDate() - 7); // 过去7天
+    const dateStr = date.toISOString().split('T')[0];
+
+    const query = `topic:ai+created:>${dateStr}&sort=stars&order=desc`;
+    const res = await fetch(`https://api.github.com/search/repositories?q=${query}&per_page=5`, {
+      headers: {
+        'User-Agent': 'OpenClaw-Bot'
+      }
+    });
+
+    const data = await res.json() as { items: any[] };
+
+    if (!data.items) return [];
+
+    return data.items.map((repo: any) => ({
+      title: `${repo.full_name} (⭐ ${repo.stargazers_count})`,
+      link: repo.html_url,
+      source: 'GitHub Trending',
+      date: repo.created_at
+    }));
+  } catch (e) {
+    console.error('GitHub API Error:', e);
+    return [];
+  }
+}
+
+/**
  * 主入口：聚合所有源
  */
 export async function fetchAllAIUpdates(): Promise<string> {
-  const [hn, anthropic, google] = await Promise.all([
+  const [hn, anthropic, google, ghTrending] = await Promise.all([
     fetchHackerNewsAI(5),
-    fetchRSS('https://www.anthropic.com/feed', 'Anthropic Blog'), // Anthropic RSS (Check URL validity)
-    fetchRSS('http://googleaiblog.blogspot.com/atom.xml', 'Google AI Blog')
+    fetchRSS('https://www.anthropic.com/feed', 'Anthropic Blog'),
+    fetchRSS('http://googleaiblog.blogspot.com/atom.xml', 'Google AI Blog'),
+    fetchGitHubTrending() // 替换了原来的 commits 源
   ]);
 
-  const allItems = [...anthropic, ...google, ...hn];
+  const allItems = [...ghTrending, ...anthropic, ...google, ...hn];
 
   if (allItems.length === 0) return "No updates found.";
 

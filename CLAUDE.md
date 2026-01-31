@@ -6,12 +6,12 @@ OpenClaw is a serverless Telegram Bot Agent deployed on Cloudflare Workers, powe
 - **Platform**: Cloudflare Workers (Hono framework)
 - **Language**: TypeScript
 - **AI Provider**: Zhipu AI (GLM-4 Flash) via OpenAI-compatible API
-- **Data Sources**: Hacker News API, Anthropic Blog RSS, Google AI Blog RSS
+- **Data Sources**: Hacker News API, GitHub Search API (Trending), Anthropic Blog RSS, Google AI Blog RSS
 
 ### File Structure
 - `src/index.ts`: Entry point. Handles Webhook routing and command dispatch (`/news`).
 - `src/ai.ts`: AI client wrapper. Handles communication with Zhipu AI.
-- `src/news.ts`: Data fetching logic. Includes RSS parsing and Hacker News filtering.
+- `src/news.ts`: Data fetching logic. Aggregates RSS feeds and GitHub API data.
 - `src/telegram.ts`: Utilities for sending messages to Telegram.
 
 ## 🛠 Common Commands
