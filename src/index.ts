@@ -1,12 +1,16 @@
 import { Hono } from 'hono';
 import { TelegramUpdate, sendMessage } from './telegram';
-import { callZAI } from './ai';
-import { fetchAllAIUpdates } from './news';
+import { handleUserMessage } from './core';
+import { FeishuEvent, sendFeishuMessage } from './feishu';
 
 type Bindings = {
   TELEGRAM_TOKEN: string;
   ZAI_API_KEY: string;
   ZAI_API_BASE_URL?: string;
+  MOONSHOT_API_KEY?: string;  // Kimi K2.5 API 密钥（可选，用于智能降级）
+  FEISHU_APP_ID: string;
+  FEISHU_APP_SECRET: string;
+  FEISHU_VERIFICATION_TOKEN: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -14,10 +18,11 @@ const app = new Hono<{ Bindings: Bindings }>();
 // Health check
 app.get('/', (c) => c.text('OpenClaw Bot is running! 🦞'));
 
-// Webhook handler
+// Telegram Webhook
 app.post('/webhook', async (c) => {
   const token = c.env.TELEGRAM_TOKEN;
   const zaiKey = c.env.ZAI_API_KEY;
+  const moonshotKey = c.env.MOONSHOT_API_KEY;
 
   if (!token || !zaiKey) {
     console.error('Missing environment variables');
@@ -33,51 +38,25 @@ app.post('/webhook', async (c) => {
 
       console.log(`Received message from ${chatId}: ${userText}`);
 
-      // --- 升级后的命令处理逻辑 ---
-      if (userText === '/news') {
-        // 1. 提示用户正在处理
-        await sendMessage(chatId, "🕵️ 正在全网搜罗 AI 情报 (Anthropic, Google, HN)...", token);
+      const reply = async (text: string) => {
+        await sendMessage(chatId, text, token);
+      };
 
-        // 2. 抓取多源数据
-        const newsRaw = await fetchAllAIUpdates();
+      // 使用 Cloudflare Workers 的 waitUntil 来避免等待，防止超时（虽然Telegram可以等，但最好快点响应）
+      // 注意：如果需要流式或长时间运行，最好使用 Queue 或 waitUntil
+      // 这里我们为了简单，直接 await，因为 Cloudflare Workers 默认有一定超时时间
+      // 但对于 /news 这种长任务，最好用 waitUntil
 
-        // 3. 构建 Prompt 让 AI 总结
-        const systemPrompt = `
-你是一个专业的 AI 行业分析师。请根据我提供的多源数据，生成一份【AI 每日观察简报】。
-数据中包含了 Hacker News 的热门讨论、Anthropic 官方博客、Google AI 官方博客的更新，以及 GitHub 上近期最火的 AI 开源项目（Trending）。
-
-请严格按照以下格式输出：
-
-## 🚀 GitHub 霸榜项目 (本周新星)
-(基于 GitHub Trending 数据，挑选最有趣的)
-- ⭐️ [项目名] (Star数)
-  > 一句话毒舌点评：这个项目是干嘛的？为什么火？
-
-## 🚨 行业热点 (精选自 Hacker News)
-(如果没有相关数据，请写“无重大热点”)
-- [emoji] 中文标题 (原文链接)
-  > 一句话深度解读
-
-## 🟣 Claude 最新动态
-(基于 Anthropic Blog 数据，如果没有则写“暂无官方更新”)
-- [emoji] 中文标题 (原文链接)
-
-## 🔵 Gemini 最新动态
-(基于 Google AI Blog 数据，如果没有则写“暂无官方更新”)
-- [emoji] 中文标题 (原文链接)
-
-## 💡 总结
-(用一句幽默的话总结今天的 AI 圈)
-`;
-        const aiResponse = await callZAI(`${systemPrompt}\n\nRaw Data:\n${newsRaw}`, zaiKey);
-
-        // 4. 发送结果
-        await sendMessage(chatId, aiResponse, token);
-
+      if (c.executionCtx) {
+          c.executionCtx.waitUntil(handleUserMessage(userText, reply, {
+            MOONSHOT_API_KEY: moonshotKey,
+            ZAI_API_KEY: zaiKey
+          }));
       } else {
-        // --- 原有：普通聊天逻辑 ---
-        const aiResponse = await callZAI(userText, zaiKey);
-        await sendMessage(chatId, aiResponse, token);
+          await handleUserMessage(userText, reply, {
+            MOONSHOT_API_KEY: moonshotKey,
+            ZAI_API_KEY: zaiKey
+          });
       }
     }
 
@@ -87,5 +66,80 @@ app.post('/webhook', async (c) => {
     return c.text('Internal Server Error', 500);
   }
 });
+
+// Feishu Webhook
+app.post('/feishu', async (c) => {
+    try {
+      const body = await c.req.json() as FeishuEvent;
+
+      // 1. URL Verification (Challenge) - 优先处理，无需配置检查
+      if (body.type === 'url_verification') {
+         console.log('[Feishu] URL verification challenge received');
+         return c.json({ challenge: body.challenge });
+      }
+
+      // 2. 配置检查 - 仅在处理实际事件时需要
+      const appId = c.env.FEISHU_APP_ID;
+      const appSecret = c.env.FEISHU_APP_SECRET;
+      const zaiKey = c.env.ZAI_API_KEY;
+      const moonshotKey = c.env.MOONSHOT_API_KEY;
+      const verificationToken = c.env.FEISHU_VERIFICATION_TOKEN;
+
+      if (!appId || !appSecret || !zaiKey) {
+         console.error('Missing Feishu/AI config');
+         return c.json({ code: 1, msg: "Config missing" });
+      }
+
+      // 2. Event Handling - 可选的 token 验证
+      if (verificationToken && body.header?.token && body.header.token !== verificationToken) {
+          console.warn('Invalid verification token');
+          return c.json({ error: 'Invalid token' }, 403);
+      }
+
+      if (body.header.event_type === 'im.message.receive_v1' && body.event?.message) {
+          const msg = body.event.message;
+          const chatId = msg.chat_id;
+
+          // 解析内容
+          // 飞书文本消息 content 是 JSON 字符串 "{\"text\":\"...\"}"
+          let text = "";
+          try {
+            const contentObj = JSON.parse(msg.content);
+            text = contentObj.text || "";
+          } catch (e) {
+            console.error("Failed to parse Feishu content:", e);
+          }
+
+          // 简单的去重/处理：飞书Bot如果接收到自己发的消息（通常不会，但以防万一）
+          // 另外，飞书@机器人时，消息内容可能包含 @Key
+          // 这里简单处理，直接传给 core
+
+          if (text) {
+            console.log(`Received Feishu message: ${text}`);
+
+            const reply = async (responseStart: string) => {
+                 await sendFeishuMessage(chatId, responseStart, appId, appSecret, 'chat_id');
+            };
+
+            if (c.executionCtx) {
+                c.executionCtx.waitUntil(handleUserMessage(text, reply, {
+                  MOONSHOT_API_KEY: moonshotKey,
+                  ZAI_API_KEY: zaiKey
+                }));
+            } else {
+                await handleUserMessage(text, reply, {
+                  MOONSHOT_API_KEY: moonshotKey,
+                  ZAI_API_KEY: zaiKey
+                });
+            }
+          }
+      }
+
+      return c.json({ code: 0, msg: "success" });
+    } catch (err) {
+      console.error('Feishu Error:', err);
+      return c.json({ code: 1, msg: "Internal Error" });
+    }
+  });
 
 export default app;

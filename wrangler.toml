@@ -4,6 +4,14 @@ compatibility_date = "2024-01-01"
 
 [vars]
 # 这里的变量是公开的，敏感信息（API Keys）请通过 `wrangler secret put` 设置
+#
+# 需要设置的 Secrets（通过 `npx wrangler secret put <KEY>` 命令）：
+# - TELEGRAM_TOKEN: Telegram Bot Token (必需)
+# - ZAI_API_KEY: 智谱 AI API Key (必需，作为备用模型)
+# - MOONSHOT_API_KEY: Moonshot Kimi API Key (可选，优先使用)
+# - FEISHU_APP_ID: 飞书应用 ID (可选，如需飞书集成)
+# - FEISHU_APP_SECRET: 飞书应用密钥 (可选)
+# - FEISHU_VERIFICATION_TOKEN: 飞书验证令牌 (可选)
 
 [observability]
 enabled = true
