@@ -99,6 +99,41 @@ async function fetchHackerNewsAI(limit: number = 10): Promise<NewsItem[]> {
   }
 }
 
+const TECH_BLOG_FEEDS = [
+  { name: 'Simon Willison', url: 'https://simonwillison.net/atom/entries/' },
+  { name: 'Jeff Geerling', url: 'https://www.jeffgeerling.com/blog.xml' },
+  { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/' },
+  { name: 'Daring Fireball', url: 'https://daringfireball.net/feeds/main' },
+  { name: 'Pluralistic', url: 'https://pluralistic.net/feed/' },
+  { name: 'Terence Eden', url: 'https://shkspr.mobi/blog/feed/' },
+  { name: 'lcamtuf', url: 'https://lcamtuf.substack.com/feed' },
+  { name: 'Mitchell Hashimoto', url: 'https://mitchellh.com/feed.xml' },
+  { name: 'Xe Iaso', url: 'https://xeiaso.net/blog.rss' }
+];
+
+/**
+ * 抓取技术博客更新 (Command: /ok)
+ */
+export async function fetchTechBlogUpdates(): Promise<string> {
+  const promises = TECH_BLOG_FEEDS.map(feed => fetchRSS(feed.url, feed.name));
+  const results = await Promise.all(promises);
+
+  const allItems: NewsItem[] = [];
+  results.forEach(items => {
+    // 每个源只取前2条，避免 Context 爆炸
+    allItems.push(...items.slice(0, 2));
+  });
+
+  if (allItems.length === 0) return "No updates found.";
+
+  let rawText = "Here are the latest Tech Blog updates:\n\n";
+  allItems.forEach((item, idx) => {
+    rawText += `${idx + 1}. [${item.source}] ${item.title}\n   Link: ${item.link}\n`;
+  });
+
+  return rawText;
+}
+
 /**
  * 抓取 GitHub 上的热门 AI 项目 (模拟 Trending)
  */
