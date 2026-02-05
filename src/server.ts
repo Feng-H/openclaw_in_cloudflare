@@ -11,5 +11,6 @@ serve({
     // 将 process.env 注入到 Hono 的 env 中，以便 src/index.ts 可以通过 c.env 访问
     return app.fetch(req, process.env);
   },
-  port
+  port,
+  hostname: '0.0.0.0'
 });

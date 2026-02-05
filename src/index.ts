@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { TelegramUpdate, sendMessage } from './telegram';
 import { handleUserMessage } from './core';
 import { FeishuEvent, sendFeishuMessage } from './feishu';
@@ -16,6 +17,8 @@ type Bindings = {
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use('/*', cors());
 
 // Health check
 app.get('/', (c) => c.text('OpenClaw Bot is running! 🦞'));
